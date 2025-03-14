@@ -240,3 +240,5 @@ def postprocess_image(
 
     if output_type == "pil":
         return numpy_to_pil(image)
+    
+    raise ValueError("Output type no in [latent, np, pil]")
