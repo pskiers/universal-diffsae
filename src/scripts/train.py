@@ -6,6 +6,8 @@ import os
 import sys
 from contextlib import nullcontext, redirect_stdout
 from dataclasses import dataclass
+from pathlib import Path
+import numpy as np
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 import torch
@@ -28,6 +30,57 @@ class RunConfig(TrainConfig):
     """Random seed for shuffling the dataset."""
     device: str = "cuda"
     num_epochs: int = 1
+
+
+def load_dataset_from_npy_dir(dir, dtype=torch.float32):
+    data_dir = Path(dir)
+    timestep = int(data_dir.name[1:])
+    file_paths = sorted(data_dir.glob('*.npy'))
+
+    if not file_paths:
+        print(f"Found no .npy files in {data_dir}")
+        exit()
+
+    def data_generator():
+        for f_path in file_paths:
+            sample_data = np.load(f_path)
+            yield {
+                "activations": sample_data,
+                "timestep": timestep
+            }
+
+    dataset = Dataset.from_generator(data_generator)
+
+    # Set format for each dataset
+    dataset.set_format(
+        type="torch",
+        columns=["activations", "timestep"],
+        dtype=dtype,
+    )
+    return dataset
+
+
+def load_datasets_from_npy_dirs(base_dirs, hookpoint, dtype=torch.float32):
+    """
+    Load and concatenate datasets from multiple directories each containing samples as .npy files.
+
+    Args:
+        base_dirs (list[str]): List of base directory paths containing the datasets
+        hookpoint (str): Name of the hookpoint directory
+        dtype: Data type for the tensors (default: torch.float32)
+
+    Returns:
+        Dataset: Concatenated dataset
+    """
+    datasets = []
+    print(f"Concatenating datasets from {base_dirs}")
+
+    for base_dir in base_dirs:
+        dataset = load_dataset_from_npy_dir(base_dir, dtype)
+        datasets.append(dataset)
+
+    # Concatenate all datasets
+    return concatenate_datasets(datasets)
 
 
 def load_datasets_from_dirs(base_dirs, hookpoint, dtype=torch.float32):
@@ -91,11 +144,17 @@ def run():
     if not ddp or rank == 0:
         for hookpoint in args.hookpoints:
             if len(args.dataset_path) > 1:
-                dataset = load_datasets_from_dirs(args.dataset_path, hookpoint, dtype)
+                try:
+                    dataset = load_datasets_from_dirs(args.dataset_path, hookpoint, dtype)
+                except Exception:
+                    dataset = load_datasets_from_npy_dirs(args.dataset_path, hookpoint, dtype)
             else:
-                dataset = Dataset.load_from_disk(
-                    os.path.join(args.dataset_path[0], hookpoint), keep_in_memory=False
-                )
+                try:
+                    dataset = Dataset.load_from_disk(
+                        os.path.join(args.dataset_path[0], hookpoint), keep_in_memory=False
+                    )
+                except Exception:
+                    dataset = load_dataset_from_npy_dir(args.dataset_path[0], dtype=dtype)
             dataset.set_format(
                 type="torch",
                 columns=["activations", "timestep"],

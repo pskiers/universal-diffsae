@@ -1,6 +1,7 @@
 from collections import defaultdict
 from dataclasses import asdict
 from time import time
+import json
 
 import psutil
 import torch
@@ -152,7 +153,7 @@ class SaeTrainer:
             hook: DataLoader(
                 ds,
                 batch_size=self.batch_size,
-                shuffle=False,
+                shuffle=True,
                 num_workers=self.cfg.num_workers,
                 persistent_workers=self.cfg.persistent_workers,
                 prefetch_factor=self.cfg.prefetch_factor,
@@ -453,6 +454,8 @@ class SaeTrainer:
                         and (step + 1) % self.cfg.save_every == 0
                     ):
                         self.save()
+                        with open(self.get_save_path() + "/feature_sparsity.json", "w") as f:
+                            json.dump({i: v for i, v in enumerate(log_feature_sparsity.tolist())}, f, indent=4)
 
                 self.global_step += 1
                 pbar.update()
@@ -536,14 +539,19 @@ class SaeTrainer:
         # Return a list of results, one for each layer
         return {hook: buffer[:, i] for i, hook in enumerate(local_hooks)}
 
-    def save(self):
-        """Save the SAEs to disk."""
-
+    def get_save_path(self) -> str:
+        """Get the path to save the SAEs to."""
         path = (
             f"sae-ckpts/{self.cfg.wandb_project}/{self.cfg.run_name}"
             if self.cfg.run_name
             else f"sae-ckpts/{self.cfg.wandb_project}"
         )
+        return path
+
+    def save(self):
+        """Save the SAEs to disk."""
+
+        path = self.get_save_path()
         rank_zero = not dist.is_initialized() or dist.get_rank() == 0
 
         if rank_zero or self.cfg.distribute_modules:
