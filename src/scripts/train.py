@@ -32,6 +32,48 @@ class RunConfig(TrainConfig):
     num_epochs: int = 1
 
 
+def load_dataset_from_npy_batch_dir(dir, dtype=torch.float32):
+    """
+    Creates a Hugging Face Dataset from a folder of .npy files.
+
+    Args:
+        dir (str): Path to the folder containing .npy files.
+        dtype: Data type for the tensors (default: torch.float32)
+
+    Returns:
+        Dataset: A Hugging Face Dataset object.
+    """
+    data_dir = Path(dir)
+    timestep = int(data_dir.parent.name[1:])
+    file_list = sorted(data_dir.glob('*.npy'))
+
+    if not file_list:
+        raise ValueError(f"No files found in {dir}")
+
+    def gen():
+        for file_path in file_list:
+            try:
+                batch = np.load(file_path, mmap_mode='r')
+                for sample in batch:
+                    yield {
+                        "activations": sample[np.newaxis, ...],
+                        "timestep": timestep
+                    }
+
+            except Exception as e:
+                print(f"Error loading {file_path}: {e}")
+                continue
+
+    dataset = Dataset.from_generator(gen)
+    dataset.set_format(
+        type="torch",
+        columns=["activations", "timestep"],
+        dtype=dtype,
+    )
+
+    return dataset
+
+
 def load_dataset_from_npy_dir(dir, dtype=torch.float32):
     data_dir = Path(dir)
     timestep = int(data_dir.name[1:])
@@ -76,7 +118,8 @@ def load_datasets_from_npy_dirs(base_dirs, hookpoint, dtype=torch.float32):
     print(f"Concatenating datasets from {base_dirs}")
 
     for base_dir in base_dirs:
-        dataset = load_dataset_from_npy_dir(base_dir, dtype)
+        # dataset = load_dataset_from_npy_dir(base_dir, dtype)
+        dataset = load_dataset_from_npy_batch_dir(base_dir, dtype)
         datasets.append(dataset)
 
     # Concatenate all datasets
@@ -154,7 +197,8 @@ def run():
                         os.path.join(args.dataset_path[0], hookpoint), keep_in_memory=False
                     )
                 except Exception:
-                    dataset = load_dataset_from_npy_dir(args.dataset_path[0], dtype=dtype)
+                    # dataset = load_dataset_from_npy_dir(args.dataset_path[0], dtype=dtype)
+                    dataset = load_dataset_from_npy_batch_dir(args.dataset_path[0], dtype=dtype)
             dataset.set_format(
                 type="torch",
                 columns=["activations", "timestep"],
