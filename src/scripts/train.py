@@ -55,6 +55,7 @@ def load_dataset_from_npy_batch_dir(dir, dtype=torch.float32):
             try:
                 batch = np.load(file_path, mmap_mode='r')
                 for sample in batch:
+                    sample = sample / np.linalg.norm(sample, ord=2)
                     yield {
                         "activations": sample[np.newaxis, ...],
                         "timestep": timestep
